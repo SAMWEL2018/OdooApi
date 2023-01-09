@@ -1,13 +1,19 @@
 from threading import Thread
 from time import sleep
 
+from dotenv import load_dotenv
 from flask import Flask
 
+from HttpService import HttpService
 from InvoiceProcessingService import InvoiceProcessingService
+
+
+load_dotenv(override=False,dotenv_path='.env')
 
 app = Flask(__name__)
 
 pos = InvoiceProcessingService()
+items= HttpService()
 
 
 @app.route('/')

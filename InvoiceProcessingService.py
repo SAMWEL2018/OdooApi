@@ -1,18 +1,13 @@
 import xmlrpc.client as cl
 
+
 from DataFetch import Fetch
+from DynamicHeaderObject import PostH
 from DynamicsJsnObject import PostInvoice
 from HttpService import HttpService
+from configs import Configs
 from OrderTrackerNumber import findCurrentOrderIndex, filemodification
-
-url = "http://localhost:8069"
-db = "oyake_softiq"  # database name here
-username = 'odoo@softiqtechnologies.co.ke'
-password = "admin4321"
-common = cl.ServerProxy('{}/xmlrpc/2/common'.format(url))
-uid = common.authenticate(db, username, password, {})
-models = cl.ServerProxy('{}/xmlrpc/2/object'.format(url))
-
+from logsConfigs import log as appLog
 
 class InvoiceProcessingService:
 
@@ -20,65 +15,53 @@ class InvoiceProcessingService:
         self.fetch = Fetch()
         self.invoice = PostInvoice()
         self.http = HttpService()
+        self.header = PostH()
+        self.cfg = Configs()
+
 
     def processInvoice(self):
-
         id = int(findCurrentOrderIndex())
-
         ordered = self.fetch.posHeader(id)
         if ordered is not None:
-            name = ordered['name']
-            customer = ordered['company_id'][1]
-            orderDate = ordered['date_order']
-
-            self.invoice.name = name
-            self.invoice.billToName = name
-            self.invoice.sellToCustomerName = customer
-            self.invoice.documentDate = orderDate
-            self.invoice.postingDate = orderDate
-
+            pos_reference = ordered['pos_reference']
+            self.header.externalDocumentNumber = pos_reference
             lineStmt = self.fetch.getLines(id)
-            paymentM = self.fetch.getPayment(id)
 
             # exact item info
             itemlist = []
             for info in lineStmt:
-                item = {
-                    "product_name": info['full_product_name'],
-                    "quantity": info['qty'],
-                    "price_unit": info['price_unit'],
-                    "product_uom_id": info['product_uom_id'][1]
-                }
-                itemlist.append(item)
+                product_name = info['full_product_name']
+                RefNo = self.fetch.getReferenceNo(product_name)
 
-            self.invoice.productsLine = itemlist
 
-            # Exact payment for each item
-            for payM in paymentM:
-                payment_method = payM['payment_method_id'][1]
-                amountInc = payM['amount']
-                self.invoice.amount = amountInc
-                self.invoice.amountIncludingVAT = amountInc
-                self.invoice.amountInc = amountInc
-                self.invoice.paymentMethod = payment_method
+                if RefNo is not None:
+                    Item_id = self.fetch.getItemid(RefNo)
+                    print('iTEM ID', Item_id)
 
-            print("Invoice :", self.invoice.getJson())
-            # push invoice to dynamics
+                    item = {
+                        "itemId": Item_id,
+                        "quantity": info['qty'],
+                        "unitPrice": info['price_unit'],
 
-            try:
-                self.http.post_Request(self.invoice.getJson())
-                filemodification(str(id + 1))
+                    }
+                    itemlist.append(item)
+                    self.header.salesOrderLines = itemlist
 
-            except Exception as e:
+                    # Exact payment for each item
+                    print("Invoice Header :", self.header.getJson())
 
-                print("Exception In Invoice Processing", e)
+                    try:
+                        self.http.post_Request(self.header.getJson())
+                        appLog(1,"Posted Sales Order : "+self.header.getJson())
+                        filemodification(str(id + 1))
+                    except Exception as e:
+                        print("Exception In Invoice Processing", e)
+                else:
+                    res = "Reference no from odoo product  is Empty!"
+                    appLog(2,"Response from API: "+res)
 
-            return self.invoice
+
+        # return self.header
         else:
-
             print("No new Order")
             return "No new order"
-
-
-        # toPost = PostMethod()
-        # toPost.post_Request(invoice.getJson())
