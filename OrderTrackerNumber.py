@@ -1,8 +1,13 @@
 Trackingfile = "OrderTracking.txt"
+SkippedOrderFile = "SkippedOrder.txt"
 
 
-def filemodification(msg):
+def OrderTrackingUpdate(msg):
     with open(Trackingfile, 'w') as f:
+        f.write(msg)
+
+def SkippedOrder(msg):
+    with open(SkippedOrderFile, 'w') as f:
         f.write(msg)
 
 

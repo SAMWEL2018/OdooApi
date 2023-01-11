@@ -1,12 +1,13 @@
 import xmlrpc.client as cl
 
+import requests.exceptions
 
 from DataFetch import Fetch
 from DynamicHeaderObject import PostH
 from DynamicsJsnObject import PostInvoice
 from HttpService import HttpService
 from configs import Configs
-from OrderTrackerNumber import findCurrentOrderIndex, filemodification
+from OrderTrackerNumber import findCurrentOrderIndex, OrderTrackingUpdate, SkippedOrder
 from logsConfigs import log as appLog
 
 class InvoiceProcessingService:
@@ -18,11 +19,10 @@ class InvoiceProcessingService:
         self.header = PostH()
         self.cfg = Configs()
 
-
     def processInvoice(self):
         id = int(findCurrentOrderIndex())
         ordered = self.fetch.posHeader(id)
-        if ordered is not None:
+        if ordered is not None and "ERROR" not in str(ordered):
             pos_reference = ordered['pos_reference']
             self.header.externalDocumentNumber = pos_reference
             lineStmt = self.fetch.getLines(id)
@@ -32,36 +32,44 @@ class InvoiceProcessingService:
             for info in lineStmt:
                 product_name = info['full_product_name']
                 RefNo = self.fetch.getReferenceNo(product_name)
-
+                print('reference ',RefNo)
 
                 if RefNo is not None:
                     Item_id = self.fetch.getItemid(RefNo)
                     print('iTEM ID', Item_id)
 
-                    item = {
-                        "itemId": Item_id,
-                        "quantity": info['qty'],
-                        "unitPrice": info['price_unit'],
+                    if Item_id is not None:
+                        item = {
+                            "itemId": Item_id,
+                            "quantity": info['qty'],
+                            "unitPrice": info['price_unit'],
 
-                    }
-                    itemlist.append(item)
-                    self.header.salesOrderLines = itemlist
+                        }
+                        itemlist.append(item)
+                        self.header.salesOrderLines = itemlist
 
-                    # Exact payment for each item
-                    print("Invoice Header :", self.header.getJson())
+                        # Exact payment for each item
+                        print("Invoice Header :", self.header.getJson())
 
-                    try:
-                        self.http.post_Request(self.header.getJson())
-                        appLog(1,"Posted Sales Order : "+self.header.getJson())
-                        filemodification(str(id + 1))
-                    except Exception as e:
-                        print("Exception In Invoice Processing", e)
+                    else:
+
+                        SkippedOrder((str(id))+" skipped Order")
+                        OrderTrackingUpdate(str(id + 1))
                 else:
                     res = "Reference no from odoo product  is Empty!"
+                    SkippedOrder((str(id)," Product missing reference No "))
+                    OrderTrackingUpdate(str(id + 1))
                     appLog(2,"Response from API: "+res)
-
-
-        # return self.header
+                    return
+            try:
+                res = self.http.post_Request(self.header.getJson())
+                if "error" not in str(res):
+                    appLog(1,"Posted Sales Order : "+self.header.getJson())
+                    OrderTrackingUpdate(str(id + 1))
+                else:
+                    print('Exception on Dynamics url')
+            except requests.exceptions.RequestException as e:
+                print("Exception In Posting the order", e)
         else:
-            print("No new Order")
+            print("No new Order",ordered)
             return "No new order"
